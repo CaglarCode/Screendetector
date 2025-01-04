@@ -1,64 +1,58 @@
 import cv2
 import numpy as np
+from ultralytics import YOLO  # RSOD detection model
 
-def is_anomalous(frame, threshold=100):
-    """
-    Analiz için görüntüde olağandışı renkler veya yazı olup olmadığını tespit eder.
-    
-    frame: OpenCV tarafından yakalanmış görüntü
-    threshold: Yazı tespiti için piksel yoğunluğu eşik değeri
-    
-    Returns: bool
-    """
-    # Görüntüyü griye çevir
-    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+class RealTimeStreamProcessor:
+    def __init__(self, input_stream, model_path):
+        self.input_stream = input_stream
+        self.model = YOLO(model_path)
 
-    # Yazı tespiti için görüntüye kenar algılama uygula
-    edges = cv2.Canny(gray_frame, 50, 150)
+    def is_anomalous(self, frame, precision=0.8):
+        """
+     
+       
+        precision: Algılama doğruluğu
 
-    # Yoğun piksel miktarını hesapla
-    pixel_density = np.sum(edges) / edges.size
+        Returns: bool
+        """
+        results = self.model.predict(source=frame, conf=precision)
+        for r in results:
+            if r.boxes:  # Eğer bir obje algılandıysa
+                return True
+        return False
 
-    if pixel_density > threshold:
-        return True  # Olağandışı içerik var
+    def process_stream(self):
+        """
+        CDN akışını okuyup kara ekran gerektiğinde mesaj yazar.
+        """
+        print("Başlangıç: CDN URL üzerindeki yazı veya kod algılanırsa black frame işlemine geçilecektir.")
 
-    return False
+        cap = cv2.VideoCapture(self.input_stream)
 
-def process_video(video_path, output_path):
-    """
-    Videoyu işleyip olağandışı içerik tespit edilen karelerde ekranı karartır.
+        if not cap.isOpened():
+            print("Akışa bağlanılamadı.")
+            return
 
-    video_path: Giriş videosunun yolu
-    output_path: Çıktı videosunun yolu
-    """
-    cap = cv2.VideoCapture(video_path)
-    
-    # Video özelliklerini al
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Akış kesildi.")
+                break
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+            # Algılama kontrolü
+            if self.is_anomalous(frame):
+                print("Anomali tespit edildi: Black frame uygulanması gerekmektedir.")
+            else:
+                print("Normal kare işlendi.")
 
-        # Olağandışı içerik var mı kontrol et
-        if is_anomalous(frame):
-            # Kara ekran oluştur
-            black_frame = np.zeros_like(frame)
-            out.write(black_frame)
-        else:
-            out.write(frame)
-
-    cap.release()
-    out.release()
-    print("Video işleme tamamlandı. Çıktı:", output_path)
+        cap.release()
+        print("Yayın işleme tamamlandı.")
 
 # Örnek kullanım
-input_video = "input_video.mp4"
-output_video = "output_video_blackout.mp4"
-process_video(input_video, output_video)
+if __name__ == "__main__":
+    input_stream = "https://dai.google.com/linear/hls/event/GxrCGmwST0ixsrc_QgB6qw/master.m3u8"  # CDN URL
+    model_path = "yolov8n.pt"  # Pre-trained model path
+
+    processor = RealTimeStreamProcessor(input_stream, model_path)
+    processor.process_stream()
+
